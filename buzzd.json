@@ -1,0 +1,41 @@
+{
+    "gpio": 21,
+    "pause": 500,
+    "mqtt": {
+        "broker": "192.168.2.1",
+        "topic": "actors/buzzer"
+    },
+    "patterns": [
+        {
+            "name": "ack",
+            "repeat": 3,
+            "rhythm": [
+                75,
+                75,
+                75
+            ]
+        },
+        {
+            "name": "nack",
+            "repeat": 1,
+            "rhythm": [
+                600,
+                100,
+                100
+            ]
+        },
+        {
+            "name": "timer",
+            "repeat": 7,
+            "rhythm": [
+                75,
+                75,
+                75,
+                75,
+                75,
+                75,
+                75
+            ]
+        }
+    ]
+}
