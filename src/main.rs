@@ -28,7 +28,7 @@ fn set_realtime() {
 fn find_config() -> Result<String, Error> {
     let config_file_name = "buzzd.json";
     let home_direcory = env::var("HOME");
-    let global_config = format!("/etc/{}", config_file_name);
+    let global_config = format!("/etc/{config_file_name}");
     let user_config = format!(
         "{}/{}/{}",
         home_direcory.unwrap_or_else(|_| String::from("/home/user")),
@@ -51,7 +51,7 @@ fn find_config() -> Result<String, Error> {
 fn load_config() -> json::Value {
     let config_file_name = find_config().expect("couldn't find buzzd configuration");
 
-    println!("Using configuration: \'{}\'", config_file_name);
+    println!("Using configuration: \'{config_file_name}\'");
 
     let json = fs::read_to_string(config_file_name).unwrap_or_else(|_| String::from("{}"));
     let config: json::Value = json::from_str(&json).expect("unable to parse configuration file");
@@ -112,9 +112,7 @@ fn play_pattern(pin: &mut OutputPin, config: &json::Value, pattern: &str, repeat
 }
 
 fn setup_mqtt_client(config: &json::Value) -> mqtt::Client {
-    let mqtt_broker = config["mqtt"]["broker"]
-        .as_str()
-        .unwrap_or("localhost");
+    let mqtt_broker = config["mqtt"]["broker"].as_str().unwrap_or("localhost");
     let mqtt_topic = config["mqtt"]["topic"].as_str().unwrap_or("buzzd");
 
     let mqtt_create_options = mqtt::CreateOptionsBuilder::new()
