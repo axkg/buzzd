@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 use std::io::{Error, ErrorKind};
-use std::{env, fs, path::Path, process, thread, time::Duration};
+use std::path::PathBuf;
+use std::{fs, path::Path, process, thread, time::Duration};
 
 use paho_mqtt as mqtt;
 use rppal::gpio::{Gpio, OutputPin};
@@ -27,21 +28,30 @@ fn set_realtime() {
 
 fn find_config() -> Result<String, Error> {
     let config_file_name = "buzzd.json";
-    let home_direcory = env::var("HOME");
-    let global_config = format!("/etc/{config_file_name}");
-    let user_config = format!(
-        "{}/{}/{}",
-        home_direcory.unwrap_or_else(|_| String::from("/home/user")),
-        ".config",
-        config_file_name
-    );
 
     if Path::new(config_file_name).exists() {
         return Ok(String::from(config_file_name));
-    } else if Path::new(&user_config).exists() {
-        return Ok(String::from(&user_config));
-    } else if Path::new(&global_config).exists() {
-        return Ok(String::from(&global_config));
+    }
+
+    let user_config_dir = dirs::config_dir();
+
+    if let Some(mut user_config_path) = user_config_dir {
+        user_config_path.push(config_file_name);
+
+        let user_config_filename = String::from(user_config_path.to_str().unwrap());
+
+        if Path::new(&user_config_filename).exists() {
+            return Ok(user_config_filename);
+        }
+    }
+
+    let mut global_config_path = PathBuf::from("/etc");
+    global_config_path.push(config_file_name);
+
+    let global_config_filename = String::from(global_config_path.to_str().unwrap());
+
+    if Path::new(&global_config_filename).exists() {
+        return Ok(global_config_filename);
     }
 
     let msg = "configuration file not found";
