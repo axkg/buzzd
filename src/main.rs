@@ -3,11 +3,17 @@
 
 use std::io::{Error, ErrorKind};
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
 use std::{fs, path::Path, process, thread, time::Duration};
 
 use paho_mqtt as mqtt;
 use rppal::gpio::{Gpio, OutputPin};
 use serde_json as json;
+
+const REQUEST_NONE: i32 = -1;
+const REQUEST_PLAY: i32 = 0;
+const REQUEST_TERMINATE: i32 = 1;
+const REQUEST_CANCEL: i32 = 2;
 
 fn mqtt_reconnect(client: &mqtt::Client) -> bool {
     println!("Connection to MQTT broker lost. Reconnecting...");
@@ -69,7 +75,13 @@ fn load_config() -> json::Value {
     config
 }
 
-fn play_pattern(pin: &mut OutputPin, config: &json::Value, pattern: &str, repeat_override: i32) {
+fn play_pattern(
+    rx: &Receiver<PlayRequest>,
+    pin: &mut OutputPin,
+    config: &json::Value,
+    pattern: &str,
+    repeat_override: i32,
+) -> PlayRequest {
     if let Some(pattern_configs) = config["patterns"].as_array() {
         for pattern_config in pattern_configs {
             if pattern_config["name"]
@@ -101,6 +113,12 @@ fn play_pattern(pin: &mut OutputPin, config: &json::Value, pattern: &str, repeat
                             thread::sleep(Duration::from_millis(
                                 step.as_u64().expect("invalid step in rhythm for pattern"),
                             ));
+
+                            // allow interruption of the pattern through a new request
+                            if let Ok(play_request) = rx.try_recv() {
+                                pin.set_high();
+                                return play_request;
+                            }
                         }
 
                         pin.set_high();
@@ -109,6 +127,12 @@ fn play_pattern(pin: &mut OutputPin, config: &json::Value, pattern: &str, repeat
                             thread::sleep(Duration::from_millis(
                                 config["pause"].as_u64().unwrap_or(500),
                             ));
+                        }
+
+                        // allow interruption of the repetitions through a new request
+                        if let Ok(play_request) = rx.try_recv() {
+                            pin.set_high();
+                            return play_request;
                         }
                     }
                 }
@@ -119,6 +143,12 @@ fn play_pattern(pin: &mut OutputPin, config: &json::Value, pattern: &str, repeat
     }
 
     pin.set_high();
+
+    PlayRequest {
+        request: REQUEST_NONE,
+        pattern: String::from(""),
+        repeat_override: -1,
+    }
 }
 
 fn setup_mqtt_client(config: &json::Value) -> mqtt::Client {
@@ -167,9 +197,59 @@ fn setup_buzzer_pin(config: &json::Value) -> OutputPin {
     pin
 }
 
+struct PlayRequest {
+    request: i32,
+    pattern: String,
+    repeat_override: i32,
+}
+
+fn playback_loop(
+    rx: &Receiver<PlayRequest>,
+    interrupt_request: &mut PlayRequest,
+    pin: &mut OutputPin,
+    config: &json::Value,
+) -> bool {
+    let mut play_request = PlayRequest {
+        request: REQUEST_NONE,
+        pattern: String::from(""),
+        repeat_override: -1,
+    };
+    if interrupt_request.request != REQUEST_NONE {
+        play_request.request = interrupt_request.request;
+        play_request.pattern = interrupt_request.pattern.clone();
+        play_request.repeat_override = interrupt_request.repeat_override;
+    } else {
+        let received_request = rx.recv().unwrap();
+        play_request.request = received_request.request;
+        play_request.pattern = received_request.pattern.clone();
+        play_request.repeat_override = received_request.repeat_override;
+    };
+
+    if play_request.request == REQUEST_PLAY {
+        *interrupt_request = play_pattern(
+            rx,
+            pin,
+            config,
+            &play_request.pattern,
+            play_request.repeat_override,
+        );
+        return true;
+    }
+
+    // reset interrupt request
+    interrupt_request.request = REQUEST_NONE;
+
+    if play_request.request == REQUEST_TERMINATE {
+        return false;
+    }
+
+    true
+}
+
 fn main() {
     // read configuration
     let config = load_config();
+    let (tx, rx) = mpsc::channel::<PlayRequest>();
 
     // create MQTT client and connect to broker
     let mqtt_client = setup_mqtt_client(&config);
@@ -185,8 +265,20 @@ fn main() {
     // acquire GPIO pin
     let mut pin = setup_buzzer_pin(&config);
 
-    // set realtime scheduling policy to stay in rhythm
-    set_realtime();
+    let thread_handle = thread::spawn(move || {
+        // set realtime scheduling policy to stay in rhythm
+        set_realtime();
+        let mut running = true;
+        let mut interrupt_request = PlayRequest {
+            request: REQUEST_NONE,
+            pattern: String::from(""),
+            repeat_override: -1,
+        };
+
+        while running {
+            running = playback_loop(&rx, &mut interrupt_request, &mut pin, &config);
+        }
+    });
 
     // ready to serve, process MQTT messages
     for pattern_command in mqtt_receiver.iter() {
@@ -200,13 +292,32 @@ fn main() {
                 .parse()
                 .unwrap_or(-1);
 
-            play_pattern(&mut pin, &config, pattern, repeat_override);
+            let mut request = PlayRequest {
+                request: REQUEST_PLAY,
+                pattern: String::from(pattern),
+                repeat_override,
+            };
+
+            if pattern.eq("_") {
+                request.request = REQUEST_CANCEL;
+            }
+
+            tx.send(request).unwrap();
         } else if mqtt_client.is_connected() || !mqtt_reconnect(&mqtt_client) {
             break;
         }
     }
 
+    tx.send(PlayRequest {
+        request: REQUEST_TERMINATE,
+        pattern: String::from(""),
+        repeat_override: -1,
+    })
+    .unwrap();
+
     if mqtt_client.is_connected() {
         mqtt_client.disconnect(None).unwrap();
     }
+
+    thread_handle.join().unwrap();
 }

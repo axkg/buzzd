@@ -12,7 +12,7 @@ The active buzzer I use buzzes when the GPIO pin is low and is silent if the pin
 
 ### Real-time Scheduling
 
-For now, `buzzd` will fail if real-time scheduling cannot be set for the `buzzd` process. If you are not running as root, add a line to `/etc/security/limits.conf` - replacing the `user` with the actual username:
+`buzzd` will try to set real-time scheduling policies fo the *pattern playback thread* to minimize the impact on the playback rhythm caused by other processes. If you are not running as root, add a line to `/etc/security/limits.conf` - replacing the `user` with the actual username:
 
 ```
 user           -       rtprio         99
@@ -42,6 +42,8 @@ The connection to the MQTT broker can be setup in the `mqtt` section:
 
 The next section in the configuration file defines a list of beeping `patterns`. A pattern may look like the following example - note that the comments prefixed with `//` are here for documentation purposes only, they cannot be included in the actual configuration file as they violate the JSON syntax.
 
+With regards to the pattern name, the name `'_'` (just the underscore) is a reserved name. It can be used to cancel the playback of the current pattern without triggering a new one.
+
 ```json
 {
     "name": "ack", // the name of the pattern
@@ -62,4 +64,8 @@ mosquitto_pub -h localhost -t actors/buzzer -m "ack"
 Provide an additional number of repetitions to override the default value configured with the pattern:
 ```bash
 mosquitto_pub -h localhost -t actors/buzzer -m "ack 2"
+```
+As noted above, it is possible to cancel any pattern playback currently in process triggering the playback of the reserved *cancel* pattern:
+```bash
+mosquitto_pub -h localhost -t actors/buzzer -m "_"
 ```
