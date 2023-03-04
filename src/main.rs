@@ -44,7 +44,7 @@ fn find_config() -> Result<String, Error> {
     if let Some(mut user_config_path) = user_config_dir {
         user_config_path.push(config_file_name);
 
-        let user_config_filename = String::from(user_config_path.to_str().unwrap());
+        let user_config_filename = user_config_path.display().to_string();
 
         if Path::new(&user_config_filename).exists() {
             return Ok(user_config_filename);
@@ -54,7 +54,7 @@ fn find_config() -> Result<String, Error> {
     let mut global_config_path = PathBuf::from("/etc");
     global_config_path.push(config_file_name);
 
-    let global_config_filename = String::from(global_config_path.to_str().unwrap());
+    let global_config_filename = global_config_path.display().to_string();
 
     if Path::new(&global_config_filename).exists() {
         return Ok(global_config_filename);
